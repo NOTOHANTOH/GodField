@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using VContainer;
 using UnityEngine;
 using System.Collections.Generic;
+using System.Linq;
 
 public class GameController
 {
@@ -14,17 +15,28 @@ public class GameController
     public Player Player1 { get; private set; }
     public Player Player2 { get; private set; }
 
+    public ReactiveProperty<bool> IsP1Turn { get; } = new ReactiveProperty<bool>(true);
+
     // ReactiveCollectionを使うと、増減した時にUI側で検知できる
     public ReactiveCollection<Card> Hand1 { get; private set; } = new ReactiveCollection<Card>();
     public ReactiveCollection<Card> Hand2 { get; private set; } = new ReactiveCollection<Card>();
 
     public ReactiveProperty<Card> FocusedCard { get; } = new ReactiveProperty<Card>();
+    public ReactiveCollection<Card> SelectedAttackCards { get; } = new ReactiveCollection<Card>();
+    public ReactiveCollection<Card> SelectedDefenseCards { get; } = new ReactiveCollection<Card>();
+
+    private UniTaskCompletionSource<Card> _cardSelectTcs; // 攻撃用の決定待ち
+    private UniTaskCompletionSource _defenseDecideTcs;    // 防御用の決定待ち(戻り値不要、シグナルのみ)
+
+    // どちらのプレイヤーの手札を今操作可能にするか(手番とは別概念)
+    public ReactiveProperty<bool> ActiveHandIsP1 { get; } = new ReactiveProperty<bool>(true);
 
     // 現在の状況をUIに伝えるためのプロパティ
     public ReactiveProperty<string> PhaseMessage { get; private set; } = new ReactiveProperty<string>("準備中");
 
-    // カードが選ばれるのを「待つ」ための仕組み
-    private UniTaskCompletionSource<Card> _cardSelectTcs;
+    private bool _isDefensePhase = false;
+
+    private UniTaskCompletionSource _decideTcs;
 
     [Inject]
     public GameController(DeckService deckService, BattleService battleService)
@@ -35,10 +47,11 @@ public class GameController
 
     public void Initialize()
     {
-        Player1 = new Player(20, 50, 100);
-        Player2 = new Player(20, 50, 100);
+        Player1 = new Player("A",20, 50, 100);
+        Player2 = new Player("B", 20, 50, 100);
 
         TurnCount.Value = 1;
+
         Debug.Log("initializing...");
     }
 
@@ -74,94 +87,134 @@ public class GameController
         string activeName = isP1Turn ? "Player1" : "Player2";
         string targetName = isP1Turn ? "Player2" : "Player1";
 
-        // ① ドロー
-        PhaseMessage.Value = $"{activeName}のターン: ドロー";
-        turnPlayerHand.Add(_deckService.DrawCard());
-        await UniTask.Delay(1000); // UIを見せるためのタメ
+        //ターン開始時のドローは廃止
 
-        // ② 攻撃カードの選択待ち
-        PhaseMessage.Value = $"{activeName}: 攻撃カードを出してください";
-        Card attackCard = await WaitForCardSelect(turnPlayerHand, true);
-        turnPlayerHand.Remove(attackCard);
+        // ②攻撃カードの選択・決定待ち
+        _isDefensePhase = false;
+        ActiveHandIsP1.Value = isP1Turn; // 攻撃側の手札を表示
+        SelectedAttackCards.Clear();
+        PhaseMessage.Value = $"{activeName}: 攻撃カードを選んで決定してください";
+        List<Card> attackCards = await WaitForAttackSelect(turnPlayerHand);
 
-        // ③ 防御カードの選択待ち（出さない場合は null になる）
-        PhaseMessage.Value = $"{targetName}: 防御カードを出してください（スキップ可）";
-        List<Card> playedDefenseCards = new List<Card>();
-
-        while (true)
+        if (attackCards == null)
         {
-            Card defenseCard = await WaitForCardSelect(defenderHand, false);
-            if (defenseCard == null) break; // スキップ（決定ボタン等）で防御フェーズ終了
-
-            playedDefenseCards.Add(defenseCard);
-            defenderHand.Remove(defenseCard);
-
-            // 更に防御カードを重ねられるようにメッセージを更新
-            PhaseMessage.Value = $"{targetName}: さらに防御カードを出せます（完了可）";
+            PhaseMessage.Value = $"{activeName}は攻撃カードがなくターンをスキップしました";
+            await UniTask.Delay(1000);
+            SelectedAttackCards.Clear();
+            return;
         }
 
-        // ④ バトルの解決
-        PhaseMessage.Value = "バトル解決！";
-        _battleService.Resolve(defender, attackCard, playedDefenseCards);
-        await UniTask.Delay(1500);
+        foreach (var c in attackCards)
+            turnPlayerHand.Remove(c);
+
+        // ③防御カードの選択・決定待ち(複数選択可)
+        _isDefensePhase = true;
+        ActiveHandIsP1.Value = !isP1Turn;
+        SelectedDefenseCards.Clear();
+        PhaseMessage.Value = $"{targetName}: 防御カードを選んで決定してください(0枚でスキップ)";
+        List<Card> playedDefenseCards = await WaitForDefenseSelect(defenderHand);
+
+        foreach (var c in playedDefenseCards)
+            defenderHand.Remove(c);
+
+        // ④バトルの解決
+        PhaseMessage.Value = "バトル解決!";
+        _battleService.Resolve(defender, attackCards, playedDefenseCards);
+        await UniTask.Delay(1000);
+
+        // ④ターン終了時に使用枚数分ドロー
+        for (int i = 0; i < attackCards.Count; i++)
+            turnPlayerHand.Add(_deckService.DrawCard());
+        for (int i = 0; i < playedDefenseCards.Count; i++)
+            defenderHand.Add(_deckService.DrawCard());
+
+        // ⑤ターン終了時にまとめてクリア
+        SelectedAttackCards.Clear();
+        SelectedDefenseCards.Clear();
     }
 
-    // UIのカードがクリックされたら呼ばれる
+    private async UniTask<List<Card>> WaitForAttackSelect(ReactiveCollection<Card> hand)
+    {
+        while (true)
+        {
+            _decideTcs = new UniTaskCompletionSource();
+            await _decideTcs.Task;
+
+            var normalCard = SelectedAttackCards.FirstOrDefault(c => c.IsAttack);
+
+            if (normalCard == null)
+            {
+                bool hasCandidate = hand.Any(c => c.IsAttack);
+                if (!hasCandidate) return null; // 通常攻撃カードが手札にない→スキップ確定
+
+                PhaseMessage.Value = "攻撃カードを選んでください!";
+                continue;
+            }
+
+            // 選択されているカード全て(通常+ブースト)が手札に実在するか確認
+            if (SelectedAttackCards.All(c => hand.Contains(c)))
+                return SelectedAttackCards.ToList();
+
+            PhaseMessage.Value = "攻撃カードを選んでください!";
+            SelectedAttackCards.Clear();
+        }
+    }
+
+    private async UniTask<List<Card>> WaitForDefenseSelect(ReactiveCollection<Card> hand)
+    {
+        _decideTcs = new UniTaskCompletionSource();
+        await _decideTcs.Task;
+
+        return SelectedDefenseCards.Where(c => hand.Contains(c) && c.IsDefense).ToList();
+    }
+
     public void SelectCard(Card card)
     {
-        if (FocusedCard.Value == card)
+        if (_isDefensePhase)
         {
-            FocusedCard.Value = null;
+            ToggleInList(SelectedDefenseCards, card);
+            return;
         }
+
+        if (card.IsAttackBoost)
+        {
+            ToggleInList(SelectedAttackCards, card);
+            return;
+        }
+
+        if (card.IsNormalAttack)
+        {
+            if (SelectedAttackCards.Contains(card))
+            {
+                SelectedAttackCards.Remove(card);
+                return;
+            }
+
+            // 既存の通常攻撃カードだけ差し替え(ブーストカードは残す)
+            var existingNormal = SelectedAttackCards.FirstOrDefault(c => c.IsAttack);
+            if (existingNormal != null)
+                SelectedAttackCards.Remove(existingNormal);
+
+            SelectedAttackCards.Add(card);
+        }
+    }
+
+    private void ToggleInList(ReactiveCollection<Card> list, Card card)
+    {
+        if (list.Contains(card))
+            list.Remove(card);
         else
-        {
-            FocusedCard.Value = card;
-        }
+            list.Add(card);
     }
 
     public void DecideCard()
     {
-        _cardSelectTcs?.TrySetResult(FocusedCard.Value);
+        _decideTcs?.TrySetResult();
     }
 
     // UIのスキップボタンがクリックされたら呼ばれる
     public void SkipDefense()
     {
         _cardSelectTcs?.TrySetResult(null);
-    }
-
-    // 指定した条件のカードが出されるまで待機する関数
-    private async UniTask<Card> WaitForCardSelect(ReactiveCollection<Card> hand, bool wantAttack)
-    {
-        while (true)
-        {
-            FocusedCard.Value = null; // 選択開始時にフォーカスをリセット
-
-            _cardSelectTcs = new UniTaskCompletionSource<Card>();
-            var card = await _cardSelectTcs.Task; // 決定ボタンが押されるまで待機
-
-
-            if (card == null)
-            {
-                if (!wantAttack)
-                {
-                    return null; // 防御フェーズならスキップ確定
-                }
-                else
-                {
-                    PhaseMessage.Value = "攻撃カードを選択してください！";
-                    continue; // 攻撃フェーズならやり直し
-                }
-            }
-            if (hand.Contains(card))
-            {
-                if (wantAttack && card.IsAttack) return card;
-                if (!wantAttack && card.IsDefense) return card;
-            }
-
-            // 間違ったカードならエラーメッセージを出して再度待つ
-            PhaseMessage.Value = wantAttack ? "攻撃カードを選んでください！" : "防御カードを選んでください！";
-            FocusedCard.Value = null; // フォーカスを外す
-        }
     }
 }

@@ -1,12 +1,19 @@
 using System.Collections.Generic;
 using UnityEngine;
+using System.Linq;
 
 public class BattleService
 {
     // 防御カードを複数枚受け取れるように List<Card> に変更
-    public void Resolve(Player defender, Card attackCard, List<Card> defenseCards)
+    public void Resolve(Player defender, List<Card> attackCards, List<Card> defenseCards)
     {
-        int atk = attackCard.Attack;
+        int atk = 0;
+        foreach (var card in attackCards)
+        {
+            if (card.IsNormalAttack) atk += card.Attack;
+            else if (card.IsAttackBoost) atk += card.BonusDamage;
+        }
+
         int def = 0;
 
         // 防御カードの合計値を計算

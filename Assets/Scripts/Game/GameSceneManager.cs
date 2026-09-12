@@ -4,6 +4,7 @@ using TMPro;
 using VContainer;
 using UniRx;
 using Cysharp.Threading.Tasks;
+using System.Linq;
 
 public class GameSceneManager : MonoBehaviour
 {
@@ -16,7 +17,9 @@ public class GameSceneManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI phaseText;
     [SerializeField] private Button attackerButton;
     [SerializeField] private Button defenderButton;
-    //[SerializeField] private SelectedCardView selectedCardView;
+    [SerializeField] private SelectedCardListView attackSelectedListView;
+    [SerializeField] private SelectedCardListView defenseSelectedListView;
+
 
     [Inject]
     public void Construct(GameController gameController)
@@ -28,19 +31,28 @@ public class GameSceneManager : MonoBehaviour
         p1StatusView.Bind(gameController.Player1);
         p2StatusView.Bind(gameController.Player2);
 
-        p1HandView.Bind(gameController.Hand1, gameController.FocusedCard, gameController.SelectCard);
-        p2HandView.Bind(gameController.Hand2, gameController.FocusedCard, gameController.SelectCard);
+        p1HandView.Bind(gameController.Hand1, gameController.SelectedAttackCards, gameController.SelectedDefenseCards, gameController.SelectCard);
+        p2HandView.Bind(gameController.Hand2, gameController.SelectedAttackCards, gameController.SelectedDefenseCards, gameController.SelectCard);
+
+        attackSelectedListView.Bind(gameController.SelectedAttackCards); // 前回作った SelectedCardListView をそのまま流用
+        defenseSelectedListView.Bind(gameController.SelectedDefenseCards);
+
+        gameController.ActiveHandIsP1
+            .Subscribe(isP1 => SwitchHandDisplay(isP1 ? 1 : 2))
+            .AddTo(this);
+
+        // 決定ボタンは1つに統合可能。両方残すなら両方に同じメソッドを紐付け
+        attackerButton.onClick.AddListener(() => gameController.DecideCard());
+        defenderButton.onClick.AddListener(() => gameController.DecideCard()); // SkipDefenseは廃止
 
         gameController.PhaseMessage.Subscribe(msg => phaseText.text = msg).AddTo(this);
-        attackerButton.onClick.AddListener(() => gameController.DecideCard());
-        defenderButton.onClick.AddListener(() => gameController.SkipDefense());
 
 
         gameController.TurnCount.Subscribe(count => turnText.text = count.ToString()).AddTo(this);
 
-        SwitchHandDisplay(1);
-
-        //selectedCardView.Bind(gameController.FocusedCard);
+        gameController.IsP1Turn
+            .Subscribe(isP1 => SwitchHandDisplay(isP1 ? 1 : 2))
+            .AddTo(this);
 
         // ③ ゲームループ開始！
         gameController.StartGameLoop().Forget();

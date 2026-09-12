@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UniRx;
+using System.Linq;
 
 
 public class CardView : MonoBehaviour
@@ -17,17 +18,21 @@ public class CardView : MonoBehaviour
     private Card _card;
     public Subject<Card> OnClick = new Subject<Card>();
 
-    public void Setup(Card card, ReactiveProperty<Card> focusedCard)
+    public void Setup(Card card, IReadOnlyReactiveCollection<Card> selectedAttack, IReadOnlyReactiveCollection<Card> selectedDefense)
     {
         _card = card;
 
-        if (card.IsAttack)
+        if (card.IsNormalAttack)
         {
             valueText.text = "攻"+card.Attack.ToString();
         }
+        if (card.IsAttackBoost)
+        {
+            valueText.text = "+" + card.BonusDamage.ToString();
+        }
         if (card.IsDefense)
         {
-            valueText.text = "防"+card.Defense.ToString();
+            valueText.text = "守"+card.Defense.ToString();
         }
 
 
@@ -45,15 +50,17 @@ public class CardView : MonoBehaviour
 
         // ※以前のリスナー登録が重複しないよう、一度クリアするのが安全です
         button.onClick.RemoveAllListeners();
-        button.onClick.AddListener(() =>
-        {
-            OnClick.OnNext(_card);
-        });
+        button.onClick.AddListener(() => OnClick.OnNext(_card));
 
-        focusedCard.Subscribe(focused =>
+        Observable.Merge(
+            selectedAttack.ObserveCountChanged(true).AsUnitObservable(),
+            selectedDefense.ObserveCountChanged(true).AsUnitObservable()
+        )
+        .Subscribe(_ =>
         {
-            bool isSelected = (focused == _card);
+            bool isSelected = selectedAttack.Contains(_card) || selectedDefense.Contains(_card);
             selected.SetActive(isSelected);
-        }).AddTo(this);
+        })
+        .AddTo(this);
     }
 }

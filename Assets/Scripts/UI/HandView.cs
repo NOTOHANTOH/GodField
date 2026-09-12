@@ -10,17 +10,14 @@ public class HandView : MonoBehaviour
 
     private ReactiveProperty<Card> _focusedCard;
 
-    public void Bind(ReactiveCollection<Card> hand, ReactiveProperty<Card> focusedCard, System.Action<Card> onClick)
+    public void Bind(ReactiveCollection<Card> hand, ReactiveCollection<Card> selectedAttack, ReactiveCollection<Card> selectedDefense, System.Action<Card> onClick)
     {
-        _focusedCard = focusedCard;
-
-        // ŽèŽD‚ª‘Œ¸‚µ‚½‚çAŽ©“®‚ÅShow‚ðŒÄ‚Ño‚µ‚ÄÄ•`‰æ‚·‚é
         hand.ObserveCountChanged(true)
-            .Subscribe(_ => Show(hand.ToList(), onClick))
+            .Subscribe(_ => Show(hand.ToList(), selectedAttack, selectedDefense, onClick))
             .AddTo(this);
     }
 
-    public void Show(List<Card> hand, System.Action<Card> onClick)
+    public void Show(List<Card> hand, ReactiveCollection<Card> selectedAttack, ReactiveCollection<Card> selectedDefense, System.Action<Card> onClick)
     {
         foreach (Transform child in parent)
             Destroy(child.gameObject);
@@ -28,7 +25,7 @@ public class HandView : MonoBehaviour
         foreach (var card in hand)
         {
             var view = Instantiate(cardPrefab, parent);
-            view.Setup(card,_focusedCard);
+            view.Setup(card, selectedAttack, selectedDefense);
             view.OnClick.Subscribe(onClick).AddTo(view);
         }
     }
