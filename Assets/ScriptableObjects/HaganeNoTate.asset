@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 86a1860040f1bc048b0b345d1cee3dfb, type: 3}
   m_Name: HaganeNoTate
   m_EditorClassIdentifier: 
+  rate: 6
   cardName: "\u306F\u304C\u306D\u306E\u76FE"
   value: 8
   cost: 8

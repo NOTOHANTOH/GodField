@@ -12,7 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ec25d1efee5cd34d9ee87dcc62179d6, type: 3}
   m_Name: DouNoKonbou
   m_EditorClassIdentifier: 
+  rate: 3
   cardName: "\u9285\u306E\u3053\u3093\u307C\u3046"
   value: 1
   cost: 1
   cardImage: {fileID: 21300000, guid: 7abefdbdec7ea2347b617708c535d799, type: 3}
+  bonusDamage: 0

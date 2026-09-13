@@ -12,8 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ec25d1efee5cd34d9ee87dcc62179d6, type: 3}
   m_Name: BattleBall
   m_EditorClassIdentifier: 
+  rate: 1
   cardName: "\u30D0\u30C8\u30EB\u30DC\u30FC\u30EB"
   value: 0
   cost: 4
-  cardImage: {fileID: 0}
+  cardImage: {fileID: 21300000, guid: 956e240e6f61c0048ae44dd12fb636d5, type: 3}
   bonusDamage: 4

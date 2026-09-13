@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 86a1860040f1bc048b0b345d1cee3dfb, type: 3}
   m_Name: CoreBarrier
   m_EditorClassIdentifier: 
+  rate: 2
   cardName: "\u30B3\u30A2\u30D0\u30EA\u30E4\u30FC"
   value: 12
   cost: 10
